@@ -9,6 +9,8 @@ night, loads your lookout base, photographs the whole map around it, looks for b
 trees, and moves on. When it sees something it pops its window to the front, beeps, and
 gives you a one-click **Join** button for that exact server.
 
+**Video walkthrough:** https://youtu.be/Km66AARWvcU
+
 ![Control panel](docs/panel.png)
 
 > **Use at your own risk.** This is an input-automation tool (it moves the mouse and presses
