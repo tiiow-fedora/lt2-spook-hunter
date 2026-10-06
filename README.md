@@ -73,8 +73,9 @@ whole server at a glance.
 
 ## Finding old servers (optional, recommended)
 
-A server needs roughly **6+ hours of uptime** before its first Spook tree can finish
-growing, so fresh servers are a waste of time. Roblox doesn't tell you a server's age, so
+A new server can't have a Spook tree: the first sapling only appears after roughly
+**6 hours of uptime**, and it takes about 3 more hours to grow. Fresh servers are a waste
+of time. Roblox doesn't tell you a server's age, so
 `tracker/lt2_tracker.py` polls the public server list every 10 minutes and remembers when
 it first saw each server. After a few hours it knows which servers are old.
 
