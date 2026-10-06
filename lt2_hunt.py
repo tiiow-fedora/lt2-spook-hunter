@@ -97,8 +97,16 @@ def move(x, y):
     _mouse(0x0001 | 0x8000, dx=int(px * 65535 / (SW - 1)) + 1, dy=int(py * 65535 / (SH - 1)))
 
 
-class SaveDialogAbort(Exception):
+class AbandonServer(Exception):
+    """Something unsafe or unexpected: stop clicking and move on to the next server."""
+
+
+class SaveDialogAbort(AbandonServer):
     """LT2's "Delete all data on this slot and replace with current progress?" box was on screen."""
+
+
+class RobloxCovered(AbandonServer):
+    """Another window (a picture viewer, a pop-up...) is in front of Roblox, so clicks would land on it."""
 
 
 def _raw_click(x, y, hover=0.25, hold=0.06):
@@ -110,6 +118,10 @@ def _raw_click(x, y, hover=0.25, hold=0.06):
 
 
 def click(x, y, hover=0.25, hold=0.06):
+    # Clicks are screen positions: only click when Roblox is the window in front.
+    if user32.GetForegroundWindow() != _rbx_hwnd and not focus_roblox():
+        print("another window is covering Roblox: not clicking, abandoning this server", flush=True)
+        raise RobloxCovered()
     # Safety net: the hunter only ever LOADS. If LT2's save-overwrite confirmation is showing, no click may
     # land (its Confirm button would overwrite a save slot): press Back instead and give up on this server.
     if delete_dialog_open(grab()):
@@ -147,13 +159,23 @@ def roblox_hwnd():
     return int(out) if out.isdigit() else 0
 
 
+_rbx_hwnd = 0
+
+
 def focus_roblox():
-    hwnd = roblox_hwnd()
-    if hwnd:
+    """Bring Roblox to the front. Returns True if it really is the foreground window afterwards."""
+    global _rbx_hwnd
+    _rbx_hwnd = hwnd = roblox_hwnd()
+    for _ in range(4):
+        if not hwnd or user32.GetForegroundWindow() == hwnd:
+            break
         user32.keybd_event(0x12, 0, 0, 0)  # alt trick so SetForegroundWindow is allowed
         user32.SetForegroundWindow(hwnd)
+        user32.BringWindowToTop(hwnd)
         user32.keybd_event(0x12, 0, 2, 0)
+        time.sleep(0.3)
     time.sleep(0.4)
+    return bool(hwnd) and user32.GetForegroundWindow() == hwnd
 
 
 def setup_report():
@@ -268,7 +290,8 @@ def is_day(img):
 
 def menu_visible(img):  # LT2's white "Menu" button, top centre, only exists once the game has loaded
     a = region(img, 705, 5, 750, 25)
-    return (a.min(axis=2) > 225).mean() > 0.3  # button is ~55% white; sky/terrain ~0%
+    # ~55% of the button is white; LT2's lighting can tint it (seen pinkish, min channel ~200), so allow that.
+    return ((a.min(axis=2) > 170) & (luma(a) > 200)).mean() > 0.3
 
 
 def popup_open(img):  # white dialog with black text averages ~220 vs ~35 for plain world
@@ -882,13 +905,24 @@ def main():
         return
 
     if args.test_plot >= 0:
-        focus_roblox()
-        print("load:", load_slot2("plottest", arrows=args.test_plot))
-        level_camera()
-        fol = os.path.join(OUT, "plot_test")
-        sc = sweep(fol)
-        make_sheet(fol)
-        print("scores", sc)
+        try:
+            focus_roblox()
+            loaded = load_slot2("plottest", arrows=args.test_plot)
+            print("load:", loaded, flush=True)
+            if not loaded:
+                return  # no point sweeping whatever happens to be on screen
+            if not is_day(grab()):
+                print("night: it's night in this server, so the camera can't find the horizon", flush=True)
+                return
+            level_camera()
+            fol = os.path.join(OUT, "plot_test")
+            sc = sweep(fol)
+            make_sheet(fol)
+            print("scores", sc)
+            if at_ground_level(fol):
+                print("on the ground: the base did not put you up high", flush=True)
+        except AbandonServer:
+            print("test stopped", flush=True)
         return
 
     if args.sweep_only:
@@ -933,7 +967,7 @@ def main():
             try:
                 if scan_plot(ptag, sid, off, args, survey=(n == 0 and args.plot_survey)):
                     counted = True
-            except SaveDialogAbort:
+            except AbandonServer:
                 break  # Back was pressed; joining the next server clears whatever was open
         if not counted:
             continue

@@ -164,6 +164,23 @@ class App:
         self.seen_flagged = set(self.rows)
         self.first_load = True
         self.tick()
+        root.after(300, self.to_front)  # fullscreen Roblox otherwise hides a freshly opened panel
+
+    def to_front(self):
+        self.root.deiconify()
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        try:  # Windows won't let a background app take focus; an Alt tap first makes it allowed
+            import ctypes
+            u = ctypes.windll.user32
+            hwnd = int(self.root.wm_frame(), 16)
+            u.keybd_event(0x12, 0, 0, 0)
+            u.SetForegroundWindow(hwnd)
+            u.keybd_event(0x12, 0, 2, 0)
+        except Exception:
+            pass
+        self.root.focus_force()
+        self.root.after(1500, lambda: self.root.attributes("-topmost", False))
 
     def inf_toggle(self):
         self.maxbox.config(state="disabled" if self.inf.get() else "normal")
@@ -278,9 +295,18 @@ class App:
         loaded = "load: True" in log
         level_ok = "could not level camera" not in log
         swept = "scores" in log
-        if loaded and level_ok and swept:
+        if "covering Roblox" in log:
+            msg = ("Another window was in front of Roblox (a picture viewer, a pop-up, a chat window...), so the "
+                   "test stopped instead of clicking it. Close it, click on Roblox once, and try again.")
+        elif "night: " in log:
+            msg = ("Slot 2 loaded fine, but it's night in this server, so there's nothing to see. Join a daytime "
+                   "server and run the test again (the hunter skips night servers on its own).")
+        elif "on the ground" in log:
+            msg = ("Slot 2 loaded, but you ended up standing on the ground. The hunter needs a base that puts you "
+                   "up high with a clear view (a tall tower works best).")
+        elif loaded and level_ok and swept:
             msg = ("Full test passed: slot 2 loaded, the camera found the horizon and the sweep finished.\n\n"
-                   "Have a look at the pictures it took (opening them now). If they show the land around your "
+                   "Close this and the pictures it took will open. If they show the land around your "
                    "base, you're ready: press Start hunt.")
         elif not loaded:
             msg = ("Slot 2 didn't load. Check that your base is saved in slot 2 and that no LT2 window was "
@@ -290,11 +316,12 @@ class App:
                    "sky all around (spawn up high). Pictures are opening so you can see what it saw.")
         else:
             msg = "The test stopped early.\n\nLog:\n" + log[-600:]
+        self.status.set("Setup test finished")
+        self.to_front()  # the test leaves fullscreen Roblox in front; don't hide the result behind it
+        messagebox.showinfo("Test my setup", msg, parent=self.root)
         sheet = os.path.join(RUNS, "plot_test", "sheet.jpg")
         if loaded and os.path.exists(sheet):
-            os.startfile(sheet)
-        self.status.set("Setup test finished")
-        messagebox.showinfo("Test my setup", msg)
+            os.startfile(sheet)  # after the message, so the picture viewer opens on top
 
     # ---- refresh
     def tick(self):
