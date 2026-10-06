@@ -1,0 +1,7 @@
+{
+  "data_dir": "data",
+  "tracker": {
+    "file": "tracker/alive.json"
+  },
+  "swamp_pass": false
+}

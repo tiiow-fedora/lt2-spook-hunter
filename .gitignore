@@ -1,0 +1,16 @@
+# personal / machine-specific
+config.json
+used_servers.txt
+reviewed.txt
+HANDOFF.md
+ref_heading.jpg
+STOP
+data/
+# tracker output
+tracker/state.json
+tracker/alive.json
+tracker/*.log
+tracker/*.lock
+tracker/*.tmp
+__pycache__/
+*.pyc
