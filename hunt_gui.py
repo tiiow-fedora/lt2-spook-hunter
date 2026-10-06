@@ -401,8 +401,36 @@ def run_mode():
     return False
 
 
+def self_test(path):
+    """LT2_SELFTEST=<file>: build the panel invisibly, check bundled files and the passive setup checks,
+    write the results to <file>, exit. Used to test a fresh .exe without putting a window over the game."""
+    out = []
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        app = App(root)
+        app.refresh()
+        out.append("panel: ok")
+        import lt2_hunt
+        from PIL import Image
+        for f in (lt2_hunt.REF_SLOT2, lt2_hunt.REF_DELETE):
+            out.append(f"{os.path.basename(f)}: {'ok' if os.path.exists(f) else 'MISSING'}")
+        Image.open(lt2_hunt.REF_DELETE).load()  # bundled image is readable
+        out.append(f"data dir: {DATA}")
+        for ok, msg in lt2_hunt.setup_report():
+            out.append(f"{ok}: {msg}")
+        root.destroy()
+    except Exception as e:
+        import traceback
+        out.append("ERROR " + repr(e) + "\n" + traceback.format_exc())
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+
+
 if __name__ == "__main__":
-    if not run_mode():
+    if os.environ.get("LT2_SELFTEST"):
+        self_test(os.environ["LT2_SELFTEST"])
+    elif not run_mode():
         root = tk.Tk()
         App(root)
         root.mainloop()

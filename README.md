@@ -36,38 +36,51 @@ About 2 minutes per server, roughly 30 images each.
 
 ![One server's sweep, as a contact sheet](docs/sweep_sheet_example.jpg)
 
-## Requirements
+## Get it (2 minutes, no Python needed)
 
-- Windows 10/11 and the Roblox desktop app.
-- Python 3.10+ (python.org installer; tick "Add to PATH").
-- Your **primary monitor** is 16:9 (1920×1080 tested) and Roblox runs maximized on it.
-- An LT2 **save slot 2** base that spawns you **high up with a clear view** — a tall tower
-  works best. The hunter loads slot 2 every server.
+1. Go to **[Releases](https://github.com/tiiow-fedora/lt2-spook-hunter/releases/latest)** and
+   download **`LT2SpookHunter.exe`**.
+2. Make a new folder (for example `Documents\LT2 Spook Hunter`) and put the exe in it.
+   Its pictures and settings will be saved in that folder.
+3. Double-click it.
 
-## Install
+**"Windows protected your PC"?** The exe isn't code-signed (that costs money), so Windows
+warns about it. Click **More info → Run anyway**. Some antivirus tools also distrust any
+program that moves the mouse and watches for a hotkey; the full source is in this repo if
+you'd rather run it from Python (below).
 
-```
-git clone https://github.com/tiiow-fedora/lt2-spook-hunter
-cd lt2-spook-hunter
-pip install -r requirements.txt
-copy config.example.json config.json
-```
+## What you need
 
-Then double-click **`Start LT2 Spook Hunter.bat`**.
+- **Windows 10 or 11** and the **Roblox app**.
+- **Roblox fullscreen on your main monitor** (press **F11** in Roblox). A normal widescreen
+  monitor (16:9, like 1920×1080).
+- **A lookout base in save slot 2.** The hunter loads slot 2 in every server, and after
+  loading you should end up **high up with a clear view all around**. The author's base is
+  a tall tower that you spawn on top of. If you load your base and you're standing on the
+  ground, the hunter will notice and skip that server, so build up.
 
-## Use
+## First run: Test my setup
 
-1. Open Roblox and join any Lumber Tycoon 2 server once (so Roblox is running).
-2. In the panel, choose **Max servers** or tick **Infinite**, then press **Start hunt**.
-3. Don't touch the mouse while it runs — it needs the Roblox window.
-4. **Press F3 at any time to stop.** It lets go of every key and button first.
+1. Open Roblox and join any Lumber Tycoon 2 server. Close any menus.
+2. In the panel press **Test my setup**. It checks your monitor, that Roblox is fullscreen on
+   the main monitor, that LT2 is loaded, and that there's disk space, and tells you in plain
+   English what to fix.
+3. If everything is OK it offers a **full test**: it loads slot 2, goes first person on your
+   base and does one sweep, then shows you the pictures. If they show the land around your
+   base, you're ready.
+
+## Hunt
+
+1. Choose **Max servers** or tick **Infinite**, then press **Start hunt**.
+2. Don't touch the mouse while it runs: it needs the Roblox window.
+3. **Press F3 at any time to stop.** It lets go of every key and button first.
 
 When a server is flagged:
 
-- **View picture** — the flagged frames with red boxes on the suspects.
-- **Join selected** — opens that exact server in Roblox.
-- **Mark false alarm** — hides it and saves the crops to `data/dataset/false_alarm`.
-- **It's a spook!** — saves it to `data/dataset/spook` (please share these — real examples
+- **View picture**: the flagged frames with red boxes on the suspects.
+- **Join selected**: opens that exact server in Roblox.
+- **Mark false alarm**: hides it and saves the crops to `data/dataset/false_alarm`.
+- **It's a spook!**: saves it to `data/dataset/spook` (please share these: real examples
   are what improve the detector).
 
 Every frame is kept in `data/runs/<time>_<server>/`; `sheet.jpg` in each folder shows a
@@ -76,32 +89,35 @@ whole server at a glance.
 ## Finding old servers (optional, recommended)
 
 A new server can't have a Spook tree: the first sapling only appears after roughly
-**6 hours of uptime**, and it takes about 3 more hours to grow. Fresh servers are a waste
-of time. Roblox doesn't tell you a server's age, so
-`tracker/lt2_tracker.py` polls the public server list every 10 minutes and remembers when
-it first saw each server. After a few hours it knows which servers are old.
+**6 hours of uptime**, and it takes about 3 more hours to grow. Roblox doesn't tell you a
+server's age, so the included tracker checks the public server list every 10 minutes and
+remembers when it first saw each server.
 
-- **On this PC:** run `tracker\install_task_windows.bat` once. Keep
-  `"tracker": {"file": "tracker/alive.json"}` in `config.json`.
-- **On a always-on Linux box / NAS:** copy the `tracker` folder there, run
-  `sh install_cron.sh`, and point `config.json` at it:
+- **Easy way:** download **`Install age tracker.bat`** from the same Release, put it next to
+  the exe, and double-click it once. Leave your PC on.
+- After a few hours, type **6** in **"Only servers older than (h)"**. Ages are lower bounds:
+  a server is *at least* that old.
+- **Always-on Linux box / NAS instead:** copy the `tracker` folder there, run
+  `sh install_cron.sh`, and add to `config.json`:
   `"tracker": {"ssh": ["ssh", "user@host"], "alive_path": "/path/to/tracker/alive.json"}`.
 
-Then set **"Only servers older than (h)"** in the panel (6–9 is a good value once the
-tracker has that much history). Ages are lower bounds: a server is *at least* that old.
+## Running from Python instead
 
-## Settings
+1. Install **Python 3.10+** from python.org and tick **"Add python.exe to PATH"**.
+2. On this page click the green **Code** button → **Download ZIP**, and extract it.
+3. Double-click **`Install requirements.bat`** (once), then **`Start LT2 Spook Hunter.bat`**.
 
-`config.json`:
+## Settings (optional)
+
+Create `config.json` next to the exe (or the scripts); see `config.example.json`:
 
 | key | meaning |
 | --- | --- |
-| `data_dir` | where screenshots go (they add up — point it at a big drive) |
-| `tracker` | where to read the age tracker's `alive.json` (see above) |
+| `data_dir` | where pictures go (they add up: point it at a big drive) |
+| `tracker` | where to read the age tracker's `alive.json` (only needed if it runs elsewhere) |
 | `swamp_pass` | extra close-up pass aimed at the swamp; tuned for the author's tower, leave `false` |
 
-Command-line options: `python lt2_hunt.py --help` (number of plots surveyed, tilt passes,
-detection threshold, `--sweep-only` to test your camera setup, ...).
+Command-line options: `LT2SpookHunter.exe --hunt --help` or `python lt2_hunt.py --help`.
 
 ## How detection works
 
@@ -115,12 +131,15 @@ and use **Mark false alarm** to keep your list clean.
 
 ## Troubleshooting
 
-- **It clicks but nothing happens** — Roblox must be on the primary monitor and maximized.
-- **"You may only load once every 60 seconds"** — normal; the hunter waits it out.
-- **Leveling fails / sweeps look at the sky** — your base needs a clear horizon; test with
-  `python lt2_hunt.py --sweep-only` while standing on it.
-- **Server list errors (HTTP 429)** — Roblox rate-limits the list; with the tracker set up the
+- **It clicks in the wrong places / nothing happens**: Roblox must be fullscreen (F11) on the
+  main monitor. Run **Test my setup**.
+- **"You may only load once every 60 seconds"**: normal; the hunter waits it out.
+- **"sweep was taken on the ground"**: your slot 2 base didn't put you up high. Build a tower.
+- **Leveling fails / sweeps look at the sky**: your base needs a clear view of the horizon.
+- **Server list errors (HTTP 429)**: Roblox rate-limits the list; with the tracker set up the
   hunter falls back to the tracker's list automatically.
+- **Safety**: the hunter only ever loads. If LT2's "replace this save slot?" box ever appears,
+  it presses Back and leaves the server.
 
 ## License
 

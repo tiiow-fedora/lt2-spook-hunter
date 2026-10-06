@@ -372,6 +372,8 @@ def read_alive():
     {"tracker": {"file": "path/to/alive.json"}} when it runs on this PC, or
     {"tracker": {"ssh": ["ssh", "user@host"], "alive_path": "/path/to/alive.json"}} when it runs elsewhere."""
     t = CFG.get("tracker") or {}
+    if not t and os.path.exists(os.path.join(HERE, "tracker", "alive.json")):
+        t = {"file": os.path.join("tracker", "alive.json")}  # tracker running on this PC, default place
     if t.get("file"):
         with open(os.path.join(HERE, t["file"])) as f:
             return json.load(f)
