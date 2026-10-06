@@ -93,7 +93,7 @@ A new server can't have a Spook tree: the first sapling only appears after rough
 server's age, so the included tracker checks the public server list every 10 minutes and
 remembers when it first saw each server.
 
-- **Easy way:** download **`Install age tracker.bat`** from the same Release, put it next to
+- **Easy way:** download **`Install.age.tracker.bat`** from the same Release, put it next to
   the exe, and double-click it once. Leave your PC on.
 - After a few hours, type **6** in **"Only servers older than (h)"**. Ages are lower bounds:
   a server is *at least* that old.
