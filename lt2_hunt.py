@@ -20,6 +20,7 @@ import json
 import os
 import random
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -33,13 +34,15 @@ from PIL import Image, ImageDraw
 from scipy import ndimage
 
 PLACE_ID = 13822889
-HERE = os.path.dirname(os.path.abspath(__file__))
+FROZEN = getattr(sys, "frozen", False)  # running as the single-file .exe
+HERE = os.path.dirname(sys.executable) if FROZEN else os.path.dirname(os.path.abspath(__file__))  # user files
+RES = getattr(sys, "_MEIPASS", HERE)  # read-only reference images bundled into the .exe
 CONFIG_FILE = os.path.join(HERE, "config.json")  # machine-specific settings; see config.example.json
 CFG = json.load(open(CONFIG_FILE)) if os.path.exists(CONFIG_FILE) else {}
 DATA = os.path.join(HERE, os.environ.get("LT2_DATA") or CFG.get("data_dir") or "data")  # relative = next to this file
 OUT = os.path.join(DATA, "runs")
 USED_FILE = os.path.join(HERE, "used_servers.txt")
-REF_SLOT2 = os.path.join(HERE, "ref_slot2.png")
+REF_SLOT2 = os.path.join(RES, "ref_slot2.png")
 STOP_FILE = os.path.join(HERE, "STOP")
 
 user32 = ctypes.windll.user32
@@ -135,17 +138,67 @@ def hold_left(seconds):
     _key(0x25, 0x4B, True)
 
 
-def focus_roblox():
+def roblox_hwnd():
+    """Window handle of the running Roblox player, or 0."""
     out = subprocess.run(
         ["powershell", "-NoProfile", "-Command",
          "(Get-Process RobloxPlayerBeta -ErrorAction SilentlyContinue | Select-Object -First 1).MainWindowHandle"],
-        capture_output=True, text=True).stdout.strip()
-    hwnd = int(out) if out.isdigit() else 0
+        capture_output=True, text=True, creationflags=0x08000000).stdout.strip()  # no console flash
+    return int(out) if out.isdigit() else 0
+
+
+def focus_roblox():
+    hwnd = roblox_hwnd()
     if hwnd:
         user32.keybd_event(0x12, 0, 0, 0)  # alt trick so SetForegroundWindow is allowed
         user32.SetForegroundWindow(hwnd)
         user32.keybd_event(0x12, 0, 2, 0)
     time.sleep(0.4)
+
+
+def setup_report():
+    """Passive checks for the "Test my setup" button: looks only, never clicks.
+    Returns [(ok, message)] where ok is True, False (a problem), or None (just information)."""
+    r = []
+    ok = abs(SW / SH - 16 / 9) < 0.02
+    r.append((ok, f"Main monitor is {SW}x{SH}" + ("" if ok else ": it must be 16:9, e.g. 1920x1080")))
+    hwnd = roblox_hwnd()
+    if not hwnd:
+        r.append((False, "Roblox isn't running. Open Roblox and join any Lumber Tycoon 2 server."))
+        return r
+    rc, pt = wintypes.RECT(), wintypes.POINT(0, 0)
+    user32.GetClientRect(hwnd, ctypes.byref(rc))
+    user32.ClientToScreen(hwnd, ctypes.byref(pt))
+    x, y, w, h = pt.x, pt.y, rc.right, rc.bottom
+    if abs(x) <= 2 and abs(y) <= 2 and abs(w - SW) <= 4 and abs(h - SH) <= 4:
+        r.append((True, "Roblox fills the main monitor"))
+    elif user32.IsIconic(hwnd):
+        r.append((False, "Roblox is minimized. Open it on the main monitor and press F11 (fullscreen)."))
+    elif abs(x) <= 10 and 0 <= y <= 60 and abs(w - SW) <= 20:
+        r.append((False, "Roblox is maximized but windowed (title bar on top). Press F11 for fullscreen."))
+    else:
+        r.append((False, f"Roblox's window is {w}x{h} at ({x}, {y}). Move it to the main monitor and press F11."))
+    img = grab()
+    if menu_visible(img):
+        r.append((True, "Lumber Tycoon 2 is loaded (its Menu button is on screen)"))
+        r.append((None, "It's daytime in this server" if is_day(img) else
+                  "It's night in this server (fine: the hunter skips night servers)"))
+    else:
+        r.append((False, "Can't see Lumber Tycoon 2's Menu button. Join an LT2 server, close any open menus, "
+                         "and keep Roblox in front."))
+    try:
+        os.makedirs(DATA, exist_ok=True)
+        free = shutil.disk_usage(DATA).free / 1e9
+        r.append((free > 5, f"Pictures go to {DATA} ({free:.0f} GB free)" +
+                  ("" if free > 5 else ": low on space, set data_dir in config.json to a bigger drive")))
+    except OSError as e:
+        r.append((False, f"Can't write to the data folder {DATA}: {e}"))
+    try:
+        hrs = read_alive().get("tracking_hours", 0)
+        r.append((None, f"Age tracker is working ({hrs:.1f} h of history)"))
+    except Exception:
+        r.append((None, "Age tracker not set up (optional: lets you hunt only old servers)"))
+    return r
 
 
 # ------------------------------------------------------------- emergency stop ----
@@ -231,7 +284,7 @@ def confirm_dialog_open(img):
     return luma(region(img, 620, 330, 840, 370)).mean() > 150
 
 
-REF_DELETE = os.path.join(HERE, "ref_delete_dialog.png")
+REF_DELETE = os.path.join(RES, "ref_delete_dialog.png")
 _ref_delete = None
 
 
@@ -480,6 +533,10 @@ def load_slot2(tag, arrows=0, stop_at_plot=False, on_plot_screen=None):
     if not wait_for(lambda im: menu_visible(im) and not select_btn_visible(im), 45):
         print("never got back into the game after Select", flush=True)
         return False
+    # The Menu button comes back BEFORE LT2 finishes loading the base and moves you onto it. Wait for the
+    # tower's blue base to come into view; if the spawn faces elsewhere, at_ground_level() catches it later.
+    if not wait_for(tower_visible, 30):
+        print("tower base not seen yet; continuing (the first sweep checks the height)", flush=True)
     time.sleep(2.0)
     return True
 
@@ -617,7 +674,9 @@ def find_trees_tiled(img):
         return -1, []
     for ty in (0, h // 2):
         for tx in (0, w // 2):
-            sc, bx = find_trees(img.crop((tx, ty, tx + w // 2, ty + h // 2)), mask_hud=False, min_mean=0)
+            sc, bx = find_trees(img.crop((tx, ty, tx + w // 2, ty + h // 2)), mask_hud=False, min_mean=60)
+            if sc < 0:
+                continue  # a tile of dark ground on its own: nothing to see, and it only makes noise
             for x0, y0, x1, y1, area in bx:
                 x0, x1, y0, y1 = x0 + tx, x1 + tx, y0 + ty, y1 + ty
                 cx, cy = (x0 + x1) / 2 / w, (y0 + y1) / 2 / h
@@ -725,6 +784,20 @@ def plot_screen_survey(tag, sid, args, plots=3, frames_per=4):
         open(os.path.join(folder, "FLAGGED"), "w").write(str(flagged))
 
 
+def at_ground_level(folder, n=10):
+    """True if the level sweep was taken standing on the grass (the base never loaded / no teleport):
+    measured median grass cover of the lower frame is <= 0.01 from a tower and ~0.5 on the ground."""
+    fr = []
+    for i in range(n):
+        p = os.path.join(folder, f"{i:02d}.jpg")
+        if os.path.exists(p):
+            a = np.asarray(Image.open(p).convert("RGB").resize((480, 270)), dtype=np.float32)[150:240]
+            r, g, b = a[..., 0], a[..., 1], a[..., 2]
+            l = 0.299 * r + 0.587 * g + 0.114 * b
+            fr.append(float(((g > r + 12) & (g > b) & (l > 20) & (l < 95)).mean()))
+    return bool(fr) and float(np.median(fr)) > 0.2
+
+
 def scan_plot(tag, sid, arrows, args, survey=False):
     """Load slot 2 onto the plot `arrows` clicks along, sweep, log. Returns True if usable frames were saved."""
     if not is_day(grab()):  # re-check just before loading: night can fall after the join-time check
@@ -741,6 +814,10 @@ def scan_plot(tag, sid, arrows, args, survey=False):
         return False
     folder = os.path.join(OUT, tag)
     scores = sweep(folder)
+    if at_ground_level(folder):
+        print(f"[{tag}] sweep was taken on the ground, not on the base (didn't load in time?), discarding",
+              flush=True)
+        return False
     if args.swamp_pass and scores and scores[-1] >= 0:
         if heading_matches(os.path.join(folder, "00.jpg")):
             scores += swamp_pass(folder, len(scores))
@@ -864,9 +941,13 @@ def main():
     print("finished", done, "day servers")
 
 
-if __name__ == "__main__":
+def cli():
     try:
         main()
     except KeyboardInterrupt:
         release_all()
         print("stopped by Ctrl+C")
+
+
+if __name__ == "__main__":
+    cli()

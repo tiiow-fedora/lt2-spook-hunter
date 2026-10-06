@@ -11,7 +11,8 @@ import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+FROZEN = getattr(sys, "frozen", False)  # running as the single-file .exe
+HERE = os.path.dirname(sys.executable) if FROZEN else os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(HERE, "config.json")  # machine-specific settings; see config.example.json
 CFG = json.load(open(CONFIG_FILE)) if os.path.exists(CONFIG_FILE) else {}
 DATA = os.path.join(HERE, os.environ.get("LT2_DATA") or CFG.get("data_dir") or "data")  # relative = next to this file
@@ -158,6 +159,8 @@ class App:
         ttk.Button(bar, text="Mark false alarm", command=self.dismiss).pack(side="left", padx=4)
         ttk.Button(bar, text="It's a spook!", command=self.confirm).pack(side="left")
         ttk.Button(bar, text="Open runs folder", command=lambda: os.startfile(RUNS)).pack(side="right")
+        ttk.Button(bar, text="Test my setup", command=self.test_setup).pack(side="right", padx=4)
+        self.test_proc = None
         self.seen_flagged = set(self.rows)
         self.first_load = True
         self.tick()
@@ -177,12 +180,19 @@ class App:
         if os.path.exists(STOP_FILE):
             os.remove(STOP_FILE)
         os.makedirs(RUNS, exist_ok=True)
-        cmd = [PY, "-u", os.path.join(HERE, "lt2_hunt.py")]
+        if FROZEN:  # the .exe runs the hunter as a second copy of itself
+            cmd = [sys.executable, "--hunt", "--log", STDOUT]
+        else:
+            cmd = [PY, "-u", os.path.join(HERE, "lt2_hunt.py")]
         if not self.inf.get():
             cmd += ["--max", self.maxn.get()]
         if float(self.age.get() or 0) > 0:
             cmd += ["--min-age-hours", self.age.get()]
-        self.out = open(STDOUT, "w", encoding="utf-8")
+        if FROZEN:
+            open(STDOUT, "w").close()  # the hunter appends to it itself (--log)
+            self.out = subprocess.DEVNULL
+        else:
+            self.out = open(STDOUT, "w", encoding="utf-8")
         self.proc = subprocess.Popen(cmd, cwd=HERE, stdout=self.out, stderr=subprocess.STDOUT,
                                      creationflags=0x08000000)  # no console window
         self.started = time.time()
@@ -227,6 +237,64 @@ class App:
             save_samples(r["tag"], [int(i) for i in r["frames"].split(",")], "spook")
             messagebox.showinfo("Saved", "Filed as a confirmed spook in dataset/spook. It stays in the list; "
                                 "join it now before the server changes.")
+
+    # ---- setup test
+    def test_setup(self):
+        if self.running() or (self.test_proc and self.test_proc.poll() is None):
+            messagebox.showinfo("Busy", "Stop the hunt first (Stop hunt or F3), then test.")
+            return
+        import lt2_hunt
+        lines, problems = [], 0
+        for ok, msg in lt2_hunt.setup_report():
+            lines.append({True: "OK   ", False: "FIX  ", None: "info "}[ok] + msg)
+            problems += ok is False
+        text = "\n".join(lines)
+        if problems:
+            messagebox.showwarning("Test my setup", text + "\n\nFix the FIX lines, then test again.")
+            return
+        if messagebox.askyesno("Test my setup", text + "\n\nLooks good. Run the full test now?\n\n"
+                               "It takes over the mouse for about a minute: loads save slot 2, goes first "
+                               "person on your base and does one sweep. Don't touch anything (F3 stops it)."):
+            if FROZEN:
+                cmd = [sys.executable, "--hunt", "--log", STDOUT, "--test-plot", "0"]
+                open(STDOUT, "w").close()
+                out = subprocess.DEVNULL
+            else:
+                cmd = [PY, "-u", os.path.join(HERE, "lt2_hunt.py"), "--test-plot", "0"]
+                out = open(STDOUT, "w", encoding="utf-8")
+            self.test_proc = subprocess.Popen(cmd, cwd=HERE, stdout=out, stderr=subprocess.STDOUT,
+                                              creationflags=0x08000000)
+            self.status.set("Running the full setup test...")
+            self.root.after(2000, self.watch_test)
+
+    def watch_test(self):
+        if self.test_proc.poll() is None:
+            self.root.after(2000, self.watch_test)
+            return
+        try:
+            log = open(STDOUT, encoding="utf-8", errors="replace").read()
+        except OSError:
+            log = ""
+        loaded = "load: True" in log
+        level_ok = "could not level camera" not in log
+        swept = "scores" in log
+        if loaded and level_ok and swept:
+            msg = ("Full test passed: slot 2 loaded, the camera found the horizon and the sweep finished.\n\n"
+                   "Have a look at the pictures it took (opening them now). If they show the land around your "
+                   "base, you're ready: press Start hunt.")
+        elif not loaded:
+            msg = ("Slot 2 didn't load. Check that your base is saved in slot 2 and that no LT2 window was "
+                   "open, then try again.\n\nLog:\n" + log[-600:])
+        elif not level_ok:
+            msg = ("Slot 2 loaded but the camera couldn't find the horizon. Your base needs a clear view of the "
+                   "sky all around (spawn up high). Pictures are opening so you can see what it saw.")
+        else:
+            msg = "The test stopped early.\n\nLog:\n" + log[-600:]
+        sheet = os.path.join(RUNS, "plot_test", "sheet.jpg")
+        if loaded and os.path.exists(sheet):
+            os.startfile(sheet)
+        self.status.set("Setup test finished")
+        messagebox.showinfo("Test my setup", msg)
 
     # ---- refresh
     def tick(self):
@@ -297,7 +365,44 @@ class App:
         self.first_load = False
 
 
+def _log_to(path):
+    f = open(path, "a", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stderr = f
+
+
+def run_mode():
+    """The .exe is one file with three jobs: the panel (default), the hunter (--hunt) and the age tracker
+    (--tracker, for Task Scheduler). Returns True if a non-panel job ran."""
+    args = sys.argv[1:]
+    if "--hunt" in args:
+        args.remove("--hunt")
+        if "--log" in args:
+            i = args.index("--log")
+            _log_to(args[i + 1])
+            del args[i:i + 2]
+        elif sys.stdout is None:
+            _log_to(os.path.join(HERE, "hunt_log.txt"))
+        import lt2_hunt
+        sys.argv = ["lt2_hunt"] + args
+        lt2_hunt.cli()
+        return True
+    if "--tracker" in args:
+        tdir = os.path.join(HERE, "tracker")
+        os.makedirs(tdir, exist_ok=True)
+        if sys.stdout is None:
+            _log_to(os.path.join(tdir, "tracker.log"))
+        sys.path.insert(0, tdir)
+        import lt2_tracker
+        lt2_tracker.HERE = tdir
+        lt2_tracker.STATE = os.path.join(tdir, "state.json")
+        lt2_tracker.ALIVE = os.path.join(tdir, "alive.json")
+        lt2_tracker.summary() if "--summary" in args else lt2_tracker.update()
+        return True
+    return False
+
+
 if __name__ == "__main__":
-    root = tk.Tk()
-    App(root)
-    root.mainloop()
+    if not run_mode():
+        root = tk.Tk()
+        App(root)
+        root.mainloop()
