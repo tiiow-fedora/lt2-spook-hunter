@@ -94,12 +94,27 @@ def move(x, y):
     _mouse(0x0001 | 0x8000, dx=int(px * 65535 / (SW - 1)) + 1, dy=int(py * 65535 / (SH - 1)))
 
 
-def click(x, y, hover=0.25, hold=0.06):
+class SaveDialogAbort(Exception):
+    """LT2's "Delete all data on this slot and replace with current progress?" box was on screen."""
+
+
+def _raw_click(x, y, hover=0.25, hold=0.06):
     move(x, y)
     time.sleep(hover)
     _mouse(0x0002)
     time.sleep(hold)
     _mouse(0x0004)
+
+
+def click(x, y, hover=0.25, hold=0.06):
+    # Safety net: the hunter only ever LOADS. If LT2's save-overwrite confirmation is showing, no click may
+    # land (its Confirm button would overwrite a save slot): press Back instead and give up on this server.
+    if delete_dialog_open(grab()):
+        _raw_click(785, 384)  # "Back"
+        time.sleep(0.8)
+        print("save-overwrite box was open: pressed Back, abandoning this server", flush=True)
+        raise SaveDialogAbort()
+    _raw_click(x, y, hover, hold)
 
 
 def scroll(ticks):
@@ -214,6 +229,20 @@ def select_btn_visible(img):
 
 def confirm_dialog_open(img):
     return luma(region(img, 620, 330, 840, 370)).mean() > 150
+
+
+REF_DELETE = os.path.join(HERE, "ref_delete_dialog.png")
+_ref_delete = None
+
+
+def delete_dialog_open(img):
+    """True when the 'Delete all data on this slot and replace with current progress?' box is up."""
+    global _ref_delete
+    if _ref_delete is None:
+        _ref_delete = Image.open(REF_DELETE).convert("RGB")
+    crop = img.crop((int(623 * F), int(302 * F), int(834 * F), int(320 * F))).resize(_ref_delete.size)
+    diff = np.abs(np.asarray(crop.convert("RGB"), dtype=np.float32) - np.asarray(_ref_delete, dtype=np.float32))
+    return diff.mean() < 25
 
 
 _ref_slot2 = None
@@ -409,28 +438,15 @@ def load_slot2(tag, arrows=0, stop_at_plot=False, on_plot_screen=None):
     if not click_until_change(668, 360, (520, 190, 940, 640)):  # Load
         print("load list did not open")
         return False
-    if popup_open(grab()):  # "You may only load once every 60 seconds" (e.g. a load from before this run)
-        print("load cooldown box; waiting it out", flush=True)
-        close_popups()
-        time.sleep(LOAD_COOLDOWN)
-        if not click_until_change(668, 360, (520, 190, 940, 640)):
-            print("load list did not open after the cooldown")
-            return False
     if os.path.exists(REF_SLOT2):
         # Success = the panel title reads "Slot 2" (never just "something changed",
         # which also fires mid-animation). Retry the row click until it matches.
         if not click_until(584, 292, slot2_panel_shown, tries=4, settle=2.0):
-            if popup_open(grab()):  # "You may only load once every 60 seconds. Wait N seconds"
-                print("load cooldown box; waiting it out", flush=True)
-                close_popups()
-                time.sleep(LOAD_COOLDOWN)
-                if not click_until(584, 292, slot2_panel_shown, tries=4, settle=2.0):
-                    print("slot 2 panel never showed after the cooldown")
-                    return False
-            else:
-                print("slot 2 panel never showed (wrong slot or no panel); closing")
-                click(822, 424)
-                return False
+            # Wrong slot, a cooldown box, or a lag spike. Do NOT click around in the save UI to recover
+            # (a stray click once opened another slot's save panel): give up on this server; leaving it
+            # clears every open dialog.
+            print("slot 2 panel never showed; leaving this server untouched")
+            return False
     elif not click_until_change(584, 292, (580, 300, 870, 400)):
         print("slot panel did not open")
         return False
@@ -835,8 +851,11 @@ def main():
         counted = False
         for n, off in enumerate(offsets):
             ptag = tag if n == 0 else f"{tag}p{off}"  # extra plots are logged as their own entries
-            if scan_plot(ptag, sid, off, args, survey=(n == 0 and args.plot_survey)):
-                counted = True
+            try:
+                if scan_plot(ptag, sid, off, args, survey=(n == 0 and args.plot_survey)):
+                    counted = True
+            except SaveDialogAbort:
+                break  # Back was pressed; joining the next server clears whatever was open
         if not counted:
             continue
         done += 1
